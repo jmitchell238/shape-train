@@ -27,6 +27,14 @@ Part of [Arcade Hub](https://jmitchell238.github.io/arcade-hub/).
 
 Static HTML / CSS / Canvas. No build step.
 
+## Tests
+
+```bash
+node tests/run.mjs
+```
+
+VM-loaded unit tests (layout, match rules, drag flow, save) plus PWA shell checks — same style as bottle-sort / maze-adventure.
+
 ## Versioning
 
 `GAME_VERSION` in `js/config.js` ↔ `CACHE` in `sw.js`.

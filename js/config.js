@@ -1,7 +1,7 @@
 'use strict';
 
 // Shape Train — Keep CACHE in sw.js in sync: 'shape-train-' + GAME_VERSION
-const GAME_VERSION = '1.0.000';
+const GAME_VERSION = '1.0.001';
 const GAME_VERSION_LABEL = 'v' + GAME_VERSION;
 const GAME_NAME = 'Shape Train';
 
@@ -16,6 +16,14 @@ const MODES = {
   pro:   { id: 'pro',   name: 'Express',   tagline: '5–6 shapes', shapes: 6, stations: 8 },
 };
 const MODE_ORDER = ['free', 'easy', 'more', 'pro'];
+
+/** Track + locomotive geometry (shared by layout + draw) */
+const TRACK_Y = 280;       // vertical center of car bodies
+const ENGINE_BODY_W = 78;
+const ENGINE_BODY_H = 48;
+const ENGINE_GAP = 10;     // gap between engine rear and first car coupler
+const CAR_GAP = 8;
+const PLATFORM_Y = H - 110;
 
 const HINT_AFTER = 6;
 
