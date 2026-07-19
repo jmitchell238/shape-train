@@ -193,14 +193,70 @@ function setVersionTags() {
   });
 }
 
+/** Reload when idle; defer mid-play so a station isn't interrupted. */
+function safeReloadForUpdate() {
+  if (window.__reloaded) return;
+  if (state === 'play') {
+    window.__pendingReload = true;
+    return;
+  }
+  window.__reloaded = true;
+  location.reload();
+}
+
+function activateWaitingWorker(reg) {
+  if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+}
+
+function watchInstallingWorker(reg) {
+  const worker = reg.installing;
+  if (!worker) return;
+  worker.addEventListener('statechange', () => {
+    if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+      worker.postMessage({ type: 'SKIP_WAITING' });
+    }
+  });
+}
+
 function registerSw() {
   if (!('serviceWorker' in navigator)) return;
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js').catch(err => console.warn('[sw]', err));
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (!window.__reloaded) window.__pendingReload = true;
+  if (!(location.protocol === 'https:' || location.hostname === 'localhost' ||
+        location.hostname === '127.0.0.1')) return;
+
+  navigator.serviceWorker.register('./sw.js').then(reg => {
+    activateWaitingWorker(reg);
+    if (reg.installing) watchInstallingWorker(reg);
+    reg.addEventListener('updatefound', () => watchInstallingWorker(reg));
+
+    const checkForUpdate = () => { reg.update().catch(() => {}); };
+    checkForUpdate();
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) checkForUpdate();
     });
+    window.addEventListener('focus', checkForUpdate);
+    setInterval(checkForUpdate, 60 * 1000);
+
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      safeReloadForUpdate();
+    });
+  }).catch(err => console.warn('[sw] register failed', err));
+
+  // Extra safety: if config.js on the network is newer than this page, reload.
+  function checkRemoteVersion() {
+    if (state === 'play') return;
+    fetch('js/config.js', { cache: 'no-store' })
+      .then(r => r.ok ? r.text() : '')
+      .then(text => {
+        const m = text.match(/GAME_VERSION\s*=\s*['"]([^'"]+)['"]/);
+        if (m && m[1] && m[1] !== GAME_VERSION) safeReloadForUpdate();
+      })
+      .catch(() => {});
+  }
+  checkRemoteVersion();
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) checkRemoteVersion();
   });
+  setInterval(checkRemoteVersion, 2 * 60 * 1000);
 }
 
 wireUi();

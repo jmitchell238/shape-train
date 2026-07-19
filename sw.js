@@ -1,5 +1,5 @@
 // Shape Train — bump with GAME_VERSION in js/config.js
-const CACHE = 'shape-train-1.0.001';
+const CACHE = 'shape-train-1.0.002';
 
 const ASSETS = [
   './',
@@ -51,7 +51,8 @@ function sameOrigin(url) {
 }
 
 function networkFirst(request) {
-  return fetch(request).then(res => {
+  // Bypass HTTP cache so GitHub Pages / browser etags cannot pin an old shell.
+  return fetch(request, { cache: 'no-store' }).then(res => {
     if (res.ok && sameOrigin(request.url)) {
       const copy = res.clone();
       caches.open(CACHE).then(c => c.put(request, copy));
