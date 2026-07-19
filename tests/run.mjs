@@ -158,8 +158,8 @@ section('script order in index.html');
   assert(man.display === 'standalone', 'manifest standalone');
 }
 
-// -------------------- pure layout: engine leads --------------------
-section('layoutTrain — engine at front (left), cars trail right');
+// -------------------- pure layout: engine leads on the RIGHT --------------------
+section('layoutTrain — cars left, engine leads right (ready to take off)');
 {
   const T = loadGame();
   for (const n of [2, 3, 4, 6]) {
@@ -169,28 +169,35 @@ section('layoutTrain — engine at front (left), cars trail right');
     assert(!!laid.engine, `n=${n} has engine`);
     assert(
       T.assertTrainOrder(laid.engine, laid.cars),
-      `n=${n} engine leads + coupled + aligned (frontX=${laid.engine.frontX}, firstCar=${laid.cars[0].x - laid.cars[0].w / 2})`
+      `n=${n} engine leads right + coupled + aligned (rearX=${laid.engine.rearX}, lastCar=${laid.cars[n - 1].x + laid.cars[n - 1].w / 2})`
     );
 
-    // Engine is left of every car
+    // Engine is right of every car
     for (const c of laid.cars) {
       assert(
-        laid.engine.frontX <= c.x - c.w / 2 + 0.01,
-        `n=${n} engine front ≤ car ${c.shape.id} left`
+        laid.engine.rearX >= c.x + c.w / 2 - 0.01,
+        `n=${n} engine rear ≥ car ${c.shape.id} right`
       );
     }
+
+    // Nose is rightmost tip
+    assert(
+      laid.engine.frontX > laid.cars[n - 1].x,
+      `n=${n} nose beyond rightmost car`
+    );
 
     // Engine y matches car y (track)
     assertEq(laid.engine.y, T.TRACK_Y, `n=${n} engine on TRACK_Y`);
     assert(laid.cars.every(c => c.y === T.TRACK_Y), `n=${n} cars on TRACK_Y`);
 
-    // Tight coupler gap
-    const gap = (laid.cars[0].x - laid.cars[0].w / 2) - laid.engine.frontX;
-    assertClose(gap, T.ENGINE_GAP, 0.5, `n=${n} engine→car gap`);
+    // Tight coupler gap: last car right → engine rear
+    const last = laid.cars[n - 1];
+    const gap = laid.engine.rearX - (last.x + last.w / 2);
+    assertClose(gap, T.ENGINE_GAP, 0.5, `n=${n} car→engine gap`);
 
     // Consist roughly centered
-    const left = laid.engine.x;
-    const right = laid.cars[n - 1].x + laid.cars[n - 1].w / 2;
+    const left = laid.cars[0].x - laid.cars[0].w / 2;
+    const right = laid.engine.frontX;
     const mid = (left + right) / 2;
     assertClose(mid, T.W / 2, 8, `n=${n} consist centered`);
   }
