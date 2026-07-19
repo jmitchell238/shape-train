@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#1a2a40" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Shape Train" />
+  <meta name="description" content="Load circle, square, and star cargo into matching train cars. Soft shape matching for ages 4–6 — choo-choo celebration, no fail screens." />
+  <title>Shape Train</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div id="stage">
+    <canvas id="cv" width="390" height="700"></canvas>
+    <div id="versionTag"></div>
+
+    <div class="screen" data-screen="menu" id="screenMenu">
+      <div class="menu-card">
+        <img class="logo-icon" src="icons/icon-192.png" alt="" width="72" height="72" />
+        <h1><span class="c1">Shape</span> <span class="c2">Train</span></h1>
+        <p class="tagline">Drag · match · choo-choo</p>
+
+        <div class="stats">
+          <div><span class="lbl">Loads</span><strong id="statLoads">0</strong></div>
+          <div><span class="lbl">Stations</span><strong id="statStations">0</strong></div>
+        </div>
+
+        <button id="btnPlay" class="primary" type="button">▶  Play</button>
+
+        <p class="mode-label">Mode</p>
+        <div class="mode-row" role="group" aria-label="Difficulty">
+          <button type="button" class="mode-chip" data-mode="free">Free Ride</button>
+          <button type="button" class="mode-chip active" data-mode="easy">Easy</button>
+          <button type="button" class="mode-chip" data-mode="more">A Little More</button>
+          <button type="button" class="mode-chip" data-mode="pro">Express</button>
+        </div>
+
+        <button id="btnHow" class="secondary" type="button">How to play</button>
+        <button id="muteBtn" class="ghost" type="button">🔊 Sound on</button>
+        <button id="motionBtn" class="ghost" type="button">Full motion</button>
+        <button id="btnHub" class="ghost" type="button">← Arcade Hub</button>
+
+        <div id="howPanel" class="how hidden">
+          <ol>
+            <li><b>Drag</b> a colorful shape from the platform.</li>
+            <li>Drop it on the train car with the <b>same shape</b> silhouette.</li>
+            <li>Wrong car? Soft bounce home + a gentle hint — <b>never a fail screen</b>.</li>
+            <li>Fill every car → whistle, smoke, and the train <b>chugs away</b>!</li>
+            <li>After a quiet moment, the right car <b>glows</b> to help.</li>
+          </ol>
+        </div>
+
+        <p id="versionMenu" class="ver"></p>
+      </div>
+    </div>
+
+    <button id="btnMenu" class="icon-btn play-chrome hidden" type="button" title="Menu">☰</button>
+
+    <div class="screen hidden" data-screen="win" id="screenWin">
+      <div class="menu-card">
+        <h2>Express complete!</h2>
+        <p class="win-banner">🚂 Choo-choo party</p>
+        <p class="tagline">Every car left full of shapes.</p>
+        <div class="stats">
+          <div><span class="lbl">This run</span><strong id="winLoads">0</strong></div>
+          <div><span class="lbl">All-time</span><strong id="winAll">0</strong></div>
+        </div>
+        <button id="btnAgain" class="primary" type="button">▶  Play again</button>
+        <button id="btnMenuWin" class="secondary" type="button">Main menu</button>
+        <p id="versionWin" class="ver"></p>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script src="js/save.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/particles.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
