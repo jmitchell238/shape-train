@@ -12,12 +12,13 @@ Part of [Arcade Hub](https://jmitchell238.github.io/arcade-hub/).
 |------|--------|----------|
 | Free Ride | 2 | Endless |
 | Easy | 3 | 4 |
-| A Little More | 4 | 6 |
-| Express | 6 | 8 |
+| A Little More | 5 | 6 |
+| Express | 8 | 8 |
 
 ## Features
 
-- Circle, square, star, triangle, heart, diamond
+- Circle, square, star, triangle, heart, diamond, moon, hex
+- Drag the train left/right to scroll long consists (portrait-first)
 - Soft wrong-drop bounce + correct-car hint
 - Full train chugs away with whistle + smoke
 - Sound mute + reduced motion

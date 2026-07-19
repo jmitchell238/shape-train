@@ -16,10 +16,13 @@ let sessionLoads = 0;
 let winFlash = 0;
 let hintTimer = 0;
 let skyPhase = 0;
-let trainOffset = 0;
+let trainOffset = 0;   // chug-away animation offset (rightward)
+let trainPan = 0;      // user scroll: positive shifts train right on screen
 let chugging = false;
 let wrongGlow = null;
 let engineBob = 0;
+/** Last layout metrics (for pan bounds) */
+let trainLayout = null;
 
 function shuffle(arr) {
   const a = arr.slice();
@@ -35,8 +38,8 @@ function currentMode() {
 }
 
 /**
- * Portrait-first train sizing: shrink cars/engine/gaps until the whole consist
- * (including nose overhang) fits in `width` with side padding.
+ * Portrait-first train sizing: keep cars chunky for little hands.
+ * Long consists may be wider than the canvas — player pans by dragging the train.
  * @param {number} n - car count
  * @param {number} [width=W]
  */
@@ -44,34 +47,23 @@ function trainMetrics(n, width = W) {
   const count = Math.max(1, n | 0);
   const pad = TRAIN_PAD;
   const nose = ENGINE_NOSE_EXTRA;
-  const maxBody = Math.max(120, width - pad * 2 - nose);
 
-  // Preferred sizes — cozy for 2–3 cars, already a bit tighter for longer trains
-  let carW = count >= 5 ? 52 : (count >= 4 ? 58 : 66);
-  let carH = 70;
-  let carGap = CAR_GAP;
-  let engW = ENGINE_BODY_W;
-  let engH = ENGINE_BODY_H;
+  // Preferred kid-friendly sizes (do not squash just to fit — pan instead)
+  let carW = count >= 7 ? 50 : (count >= 5 ? 54 : (count >= 4 ? 58 : 66));
+  let carH = count >= 7 ? 62 : (count >= 5 ? 66 : 70);
+  let carGap = count >= 6 ? 6 : CAR_GAP;
+  let engW = count >= 7 ? 68 : ENGINE_BODY_W;
+  let engH = count >= 7 ? 44 : ENGINE_BODY_H;
   let engGap = ENGINE_GAP;
-
-  const bodyW = () =>
-    count * carW + Math.max(0, count - 1) * carGap + engGap + engW;
-
-  if (bodyW() > maxBody) {
-    const scale = maxBody / bodyW();
-    carW = Math.max(34, Math.floor(carW * scale));
-    carGap = Math.max(2, Math.floor(carGap * scale));
-    engW = Math.max(44, Math.floor(engW * scale));
-    engGap = Math.max(3, Math.floor(engGap * scale));
-    // Keep cars a bit taller than they are wide for tap targets
-    carH = Math.max(50, Math.min(70, Math.floor(carW * 1.25)));
-    engH = Math.max(30, Math.min(ENGINE_BODY_H, Math.floor(engW * 0.62)));
-  }
 
   const carsWidth = count * carW + Math.max(0, count - 1) * carGap;
   const consistBody = carsWidth + engGap + engW;
-  // Center body; leave room for nose on the right and pad on the left
-  const left = Math.max(pad, (width - consistBody - nose) / 2);
+  const visualW = consistBody + nose;
+  const available = width - pad * 2;
+  const overflows = visualW > available + 0.5;
+  // Overflow: pin left edge to pad so pan reveals the engine on the right.
+  // Fits: center the consist in the portrait frame.
+  const left = overflows ? pad : Math.max(pad, (width - consistBody - nose) / 2);
 
   return {
     n: count,
@@ -86,7 +78,8 @@ function trainMetrics(n, width = W) {
     left,
     pad,
     nose,
-    // Full visual span from first car left to nose tip
+    overflows,
+    visualW,
     visualRight: left + consistBody + nose,
     visualLeft: left,
   };
@@ -95,8 +88,7 @@ function trainMetrics(n, width = W) {
 /**
  * Pure train layout for departure to the RIGHT:
  *   [car][car][car] … [engine→]
- * Engine leads on the RIGHT (nose faces right); cars trail behind to the left.
- * Scales down for portrait so Express (6 cars) never clips. Returns { engine, cars, carW, metrics }.
+ * Engine leads on the RIGHT. Long trains may overflow — use trainPan to scroll.
  * @param {object[]} palette - shape defs for each car (leftmost car first)
  * @param {number} [width=W]
  */
@@ -118,14 +110,12 @@ function layoutTrain(palette, width = W) {
     };
   });
 
-  // Engine sits just right of the last car; nose (front) faces right to lead departure
   const engineLeft = left + carsWidth + engGap;
   const engine = {
-    x: engineLeft,           // left edge of engine body (for drawing)
-    y: TRACK_Y,              // vertical center (aligned with cars)
+    x: engineLeft,
+    y: TRACK_Y,
     w: engW,
     h: engH,
-    // front = right (nose body edge), rear = left (toward cars)
     frontX: engineLeft + engW,
     rearX: engineLeft,
   };
@@ -133,16 +123,61 @@ function layoutTrain(palette, width = W) {
   return { engine, cars: carList, carW, metrics: m };
 }
 
-/** Entire consist (cars + engine body + nose) stays inside the canvas with padding. */
+/** True when the whole consist fits without panning (pan bounds collapse to 0). */
 function trainFitsOnScreen(laid, width = W) {
   if (!laid || !laid.engine || !laid.cars || !laid.cars.length) return false;
+  const b = trainPanBounds(laid, width);
+  return b.fits;
+}
+
+/**
+ * Pan limits so the train can be scrolled but never leaves empty dead zones.
+ * Pan positive → train moves right on screen.
+ * @returns {{ min: number, max: number, fits: boolean }}
+ */
+function trainPanBounds(laid, width = W) {
+  if (!laid || !laid.engine || !laid.cars || !laid.cars.length) {
+    return { min: 0, max: 0, fits: true };
+  }
   const pad = TRAIN_PAD;
-  const first = laid.cars[0];
-  const left = first.x - first.w / 2;
+  const left = laid.cars[0].x - laid.cars[0].w / 2;
   const right = laid.engine.frontX + ENGINE_NOSE_EXTRA;
-  if (left < pad - 0.5) return false;
-  if (right > width - pad + 0.5) return false;
-  return true;
+  const contentW = right - left;
+  const viewW = width - pad * 2;
+  if (contentW <= viewW + 0.5) {
+    // Centered layout already fits — lock pan
+    return { min: 0, max: 0, fits: true };
+  }
+  // max: left edge of consist at pad; min: right tip at width-pad
+  const max = pad - left;
+  const min = (width - pad) - right;
+  return { min, max, fits: false };
+}
+
+function clampTrainPan(p, laid, width = W) {
+  const b = trainPanBounds(laid || liveTrainLayout(), width);
+  return Math.max(b.min, Math.min(b.max, p));
+}
+
+/** Live layout snapshot for pan bounds (cars + engine currently in play). */
+function liveTrainLayout() {
+  if (trainLayout) return trainLayout;
+  if (!engine || !cars.length) return null;
+  return { engine, cars, metrics: trainMetrics(cars.length) };
+}
+
+function trainDrawOffset() {
+  return trainPan + trainOffset;
+}
+
+/** Vertical band around the track where horizontal pan drags work. */
+function hitTrainBand(x, y) {
+  return y >= TRAIN_BAND_TOP && y <= TRAIN_BAND_BOT;
+}
+
+function trainNeedsPan(laid) {
+  const b = trainPanBounds(laid || liveTrainLayout());
+  return !b.fits;
 }
 
 /**
@@ -154,16 +189,25 @@ function trainFitsOnScreen(laid, width = W) {
 function layoutCargo(palette, width = W, height = H) {
   const n = palette.length;
   const kinds = shuffle(palette);
+  // Two rows when many shapes so platform stays tappable in portrait
+  const cols = n <= 4 ? n : Math.ceil(n / 2);
+  const rows = n <= 4 ? 1 : 2;
+  const r = n >= 7 ? 24 : (n >= 5 ? 28 : 34);
+  const topY = height - (rows === 2 ? 145 : 110);
+  const rowGap = 56;
   return kinds.map((shape, i) => {
-    const cellW = (width - 48) / n;
-    const x = 24 + cellW * i + cellW / 2;
-    const y = height - 110;
+    const row = rows === 1 ? 0 : Math.floor(i / cols);
+    const col = rows === 1 ? i : (i % cols);
+    const inRow = rows === 1 ? n : Math.min(cols, n - row * cols);
+    const cellW = (width - 40) / inRow;
+    const x = 20 + cellW * col + cellW / 2;
+    const y = topY + row * rowGap;
     return {
       shape,
       x, y,
       homeX: x,
       homeY: y,
-      r: n >= 5 ? 28 : 34,
+      r,
       placed: false,
       bounce: 0,
       returning: false,
@@ -222,12 +266,18 @@ function layoutStation() {
   const laid = layoutTrain(palette);
   engine = laid.engine;
   cars = laid.cars;
+  trainLayout = laid;
   cargo = layoutCargo(palette);
 
   hintTimer = 0;
   wrongGlow = null;
   drag = null;
   trainOffset = 0;
+  trainPan = 0;
+  // Start panned so engine (right) is in view for long trains; user can drag left for caboose
+  if (laid.metrics && laid.metrics.overflows) {
+    trainPan = clampTrainPan(trainPanBounds(laid).min, laid); // show engine first
+  }
   chugging = false;
 }
 
@@ -284,6 +334,7 @@ function nextStationOrWin() {
 function startChugAway() {
   if (chugging) return;
   chugging = true;
+  drag = null;
   sfxWhistle();
   sfxChug();
   spawnBurst(W / 2, 250, '#FFD56A', 20);
@@ -295,11 +346,10 @@ function startChugAway() {
   const tick = (now) => {
     if (state !== 'play') return;
     const t = Math.min(1, (now - start) / (dur * 1000));
-    trainOffset = t * (W + 120);
+    trainOffset = t * (W + 160);
     if (t < 0.3 || Math.floor(t * 8) !== Math.floor((t - 0.02) * 8)) {
-      // Chimney is near the nose (right side of engine)
       const smokeX = engine
-        ? engine.x + engine.w - 22 + trainOffset
+        ? engine.x + engine.w - 22 + trainDrawOffset()
         : W * 0.7 + trainOffset * 0.3;
       spawnSmoke(smokeX, 200);
     }
@@ -324,14 +374,18 @@ function hitCargo(x, y) {
 }
 
 function hitCar(x, y) {
+  // Screen coords → train world (undo pan / chug)
+  const ox = trainDrawOffset();
   let best = null;
   let bestD = Infinity;
   for (const car of cars) {
     if (car.filled) continue;
+    const cx = car.x + ox;
+    const cy = car.y;
     const halfW = car.w * 0.7;
     const halfH = car.h * 0.7;
-    if (Math.abs(x - car.x) <= halfW && Math.abs(y - car.y) <= halfH) {
-      const d = Math.hypot(x - car.x, y - car.y);
+    if (Math.abs(x - cx) <= halfW && Math.abs(y - cy) <= halfH) {
+      const d = Math.hypot(x - cx, y - cy);
       if (d < bestD) { best = car; bestD = d; }
     }
   }
@@ -340,22 +394,42 @@ function hitCar(x, y) {
 
 function startDrag(x, y) {
   if (state !== 'play' || chugging) return;
+  // Cargo first (platform shapes)
   const c = hitCargo(x, y);
-  if (!c) return;
-  drag = { cargo: c, ox: x - c.x, oy: y - c.y };
-  sfxPickup();
-  c.bounce = 0.2;
-  hintTimer = 0;
+  if (c) {
+    drag = { kind: 'cargo', cargo: c, ox: x - c.x, oy: y - c.y };
+    sfxPickup();
+    c.bounce = 0.2;
+    hintTimer = 0;
+    return;
+  }
+  // Horizontal pan on the track band when the train is longer than the screen
+  if (hitTrainBand(x, y) && trainNeedsPan()) {
+    drag = { kind: 'pan', lastX: x };
+    hintTimer = 0;
+  }
 }
 
 function moveDrag(x, y) {
   if (!drag) return;
-  drag.cargo.x = x - drag.ox;
-  drag.cargo.y = y - drag.oy;
+  if (drag.kind === 'pan') {
+    const dx = x - drag.lastX;
+    drag.lastX = x;
+    trainPan = clampTrainPan(trainPan + dx);
+    return;
+  }
+  if (drag.kind === 'cargo' && drag.cargo) {
+    drag.cargo.x = x - drag.ox;
+    drag.cargo.y = y - drag.oy;
+  }
 }
 
 function endDrag(x, y) {
   if (!drag) return;
+  if (drag.kind === 'pan') {
+    drag = null;
+    return;
+  }
   const c = drag.cargo;
   const car = hitCar(c.x, c.y);
   drag = null;
@@ -367,8 +441,9 @@ function endDrag(x, y) {
     car.filled = true;
     c.bounce = 0.35;
     sfxLoad();
-    spawnBurst(car.x, car.y, c.shape.color, 14);
-    spawnPraise(car.x, car.y - 50);
+    const ox = trainDrawOffset();
+    spawnBurst(car.x + ox, car.y, c.shape.color, 14);
+    spawnPraise(car.x + ox, car.y - 50);
     recordLoad();
     sessionLoads++;
     hintTimer = 0;
@@ -381,7 +456,8 @@ function endDrag(x, y) {
   } else {
     sfxWrong();
     if (car) {
-      spawnPraise(car.x, car.y - 40, c.shape.label + ' car!');
+      const ox = trainDrawOffset();
+      spawnPraise(car.x + ox, car.y - 40, c.shape.label + ' car!');
       const correct = cars.find(p => p.shape.id === c.shape.id && !p.filled);
       if (correct) wrongGlow = { car: correct, t: 0.75, good: true };
     }
@@ -407,7 +483,7 @@ function updatePlay(dt) {
         c.y = c.homeY;
         c.returning = false;
       }
-    } else if (!c.placed && (!drag || drag.cargo !== c)) {
+    } else if (!c.placed && (!drag || drag.kind !== 'cargo' || drag.cargo !== c)) {
       c.y = c.homeY + Math.sin(c.wiggle) * 2;
     }
   }
@@ -473,6 +549,20 @@ function drawShapePath(ctx, id, r) {
     ctx.bezierCurveTo(-r * 1.1, r * 0.05, -r * 0.7, -r * 0.85, 0, -r * 0.35);
     ctx.bezierCurveTo(r * 0.7, -r * 0.85, r * 1.1, r * 0.05, 0, r * 0.7);
     ctx.closePath();
+  } else if (id === 'moon') {
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.closePath();
+  } else if (id === 'hex') {
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const a = -Math.PI / 2 + i * Math.PI / 3;
+      const px = Math.cos(a) * r;
+      const py = Math.sin(a) * r;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
   } else {
     // diamond
     ctx.beginPath();
@@ -506,12 +596,32 @@ function drawShape(ctx, shape, x, y, r, opts = {}) {
     ctx.setLineDash([5, 4]);
     ctx.stroke();
     ctx.setLineDash([]);
+    // Crescent cutout for moon silhouette
+    if (shape.id === 'moon') {
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.beginPath();
+      ctx.arc(r * 0.35, -r * 0.1, r * 0.72, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalCompositeOperation = 'source-over';
+    }
   } else {
     ctx.fillStyle = shape.color;
     ctx.fill();
     ctx.strokeStyle = shape.color2;
     ctx.lineWidth = 2.5;
     ctx.stroke();
+    // Crescent cutout for moon
+    if (shape.id === 'moon') {
+      ctx.fillStyle = silhouette ? 'rgba(0,0,0,0.22)' : '#81D4FA';
+      // Use sky-ish punch only when not silhouette — on car filled bg differs
+      // Soft shadow crescent instead of true cutout (works on any bg)
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(r * 0.32, -r * 0.08, r * 0.7, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(0,0,0,0.18)';
+      ctx.fill();
+      ctx.restore();
+    }
     // shine
     ctx.fillStyle = 'rgba(255,255,255,0.28)';
     ctx.beginPath();
@@ -737,14 +847,36 @@ function drawHud(ctx) {
   }
 }
 
+function drawPanHints(ctx) {
+  if (chugging || !trainNeedsPan()) return;
+  const b = trainPanBounds(liveTrainLayout());
+  const y = TRACK_Y;
+  ctx.save();
+  ctx.font = 'bold 22px "Segoe UI", system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  // ‹ = more train to the left (increase pan); › = more train to the right (decrease pan)
+  if (trainPan < b.max - 2) {
+    ctx.globalAlpha = 0.45 + 0.25 * Math.sin(skyPhase * 3);
+    ctx.fillText('‹', 18, y);
+  }
+  if (trainPan > b.min + 2) {
+    ctx.globalAlpha = 0.45 + 0.25 * Math.sin(skyPhase * 3 + 1);
+    ctx.fillText('›', W - 18, y);
+  }
+  ctx.restore();
+}
+
 function drawPlay(ctx) {
   drawStationBg(ctx);
 
-  const ox = trainOffset;
+  const ox = trainDrawOffset();
 
   // Cars trail on the left; engine leads on the right (nose faces takeoff direction)
   for (const car of cars) drawCar(ctx, car, ox);
   drawEngine(ctx, ox, engine);
+  drawPanHints(ctx);
 
   // Idle hint on correct car for first free cargo
   if (hintTimer > HINT_AFTER && !drag && !chugging) {
@@ -766,7 +898,7 @@ function drawPlay(ctx) {
 
   // Cargo (skip if placed and train is chugging — they ride with cars)
   for (const c of cargo) {
-    if (drag && drag.cargo === c) continue;
+    if (drag && drag.kind === 'cargo' && drag.cargo === c) continue;
     if (c.placed) {
       const bounce = c.bounce > 0 ? Math.sin((1 - c.bounce / 0.35) * Math.PI) * 0.15 : 0;
       drawShape(ctx, c.shape, c.x + ox, c.y - 2, c.r * 0.7, { scale: 1 + bounce });
@@ -775,7 +907,7 @@ function drawPlay(ctx) {
       drawShape(ctx, c.shape, c.x, c.y, c.r, { scale: 1 + bounce, label: true });
     }
   }
-  if (drag) {
+  if (drag && drag.kind === 'cargo' && drag.cargo) {
     const c = drag.cargo;
     drawShape(ctx, c.shape, c.x, c.y, c.r, { scale: 1.12, label: true });
   }
@@ -787,7 +919,10 @@ function drawPlay(ctx) {
     ctx.font = '14px "Segoe UI", system-ui, sans-serif';
     ctx.fillStyle = 'rgba(255,255,255,0.9)';
     ctx.textAlign = 'center';
-    ctx.fillText('Drag shapes into matching cars', W / 2, H - 28);
+    const tip = trainNeedsPan()
+      ? 'Drag shapes onto cars · drag train to scroll'
+      : 'Drag shapes into matching cars';
+    ctx.fillText(tip, W / 2, H - 28);
   }
 }
 
