@@ -1,0 +1,26 @@
+{
+  "name": "Shape Train",
+  "short_name": "Shape Train",
+  "description": "Load circle, square, and star cargo into matching train cars. Soft shape matching for ages 4–6 — choo-choo celebration, no fail screens.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1a2a40",
+  "theme_color": "#1a2a40",
+  "categories": ["games", "kids", "entertainment"],
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
