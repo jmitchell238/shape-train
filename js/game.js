@@ -34,46 +34,117 @@ function currentMode() {
   return MODES[modeId] || MODES.easy;
 }
 
-function layoutStation() {
-  const m = currentMode();
-  const n = Math.min(SHAPES.length, m.shapes | 0);
-  const palette = shuffle(SHAPES).slice(0, n);
+/**
+ * Pure train layout: engine leads on the LEFT (nose faces right), cars trail behind.
+ * Whole consist is centered on the canvas. Returns { engine, cars, carW }.
+ * @param {object[]} palette - shape defs for each car (front car first)
+ * @param {number} [width=W]
+ */
+function layoutTrain(palette, width = W) {
+  const n = palette.length;
+  const carW = n >= 5 ? 52 : (n >= 4 ? 58 : 66);
+  const carH = 70;
+  const carsWidth = n * carW + Math.max(0, n - 1) * CAR_GAP;
+  // Engine left edge → rear coupler → gap → first car left edge → … → last car right
+  const consistW = ENGINE_BODY_W + ENGINE_GAP + carsWidth;
+  const left = (width - consistW) / 2;
 
-  // Cars along upper track
-  const trackY = 280;
-  const carW = n >= 5 ? 58 : (n >= 4 ? 64 : 72);
-  const gap = 8;
-  const totalW = n * carW + (n - 1) * gap;
-  let x0 = (W - totalW) / 2 + carW / 2;
+  // Engine: left edge at `left`; nose (front) is on the right side of the body
+  const engine = {
+    x: left,                 // left edge of engine body (for drawing)
+    y: TRACK_Y,              // vertical center (aligned with cars)
+    w: ENGINE_BODY_W,
+    h: ENGINE_BODY_H,
+    // front = right, rear = left
+    frontX: left + ENGINE_BODY_W,
+    rearX: left,
+  };
 
-  cars = palette.map((shape, i) => ({
-    shape,
-    x: x0 + i * (carW + gap),
-    y: trackY,
-    w: carW,
-    h: 70,
-    filled: false,
-    pulse: Math.random() * Math.PI * 2,
-  }));
+  const firstCarLeft = left + ENGINE_BODY_W + ENGINE_GAP;
+  const carList = palette.map((shape, i) => {
+    const carLeft = firstCarLeft + i * (carW + CAR_GAP);
+    return {
+      shape,
+      x: carLeft + carW / 2,
+      y: TRACK_Y,
+      w: carW,
+      h: carH,
+      filled: false,
+      pulse: i * 0.7,
+    };
+  });
 
-  // Cargo along bottom platform
+  return { engine, cars: carList, carW };
+}
+
+/**
+ * Pure cargo layout under the platform.
+ * @param {object[]} palette
+ * @param {number} [width=W]
+ * @param {number} [height=H]
+ */
+function layoutCargo(palette, width = W, height = H) {
+  const n = palette.length;
   const kinds = shuffle(palette);
-  cargo = kinds.map((shape, i) => {
-    const cellW = (W - 48) / n;
+  return kinds.map((shape, i) => {
+    const cellW = (width - 48) / n;
     const x = 24 + cellW * i + cellW / 2;
-    const y = H - 110;
+    const y = height - 110;
     return {
       shape,
       x, y,
       homeX: x,
       homeY: y,
-      r: n >= 5 ? 30 : 34,
+      r: n >= 5 ? 28 : 34,
       placed: false,
       bounce: 0,
       returning: false,
-      wiggle: Math.random() * Math.PI * 2,
+      wiggle: i * 0.9,
     };
   });
+}
+
+/** Whether cargo can load into this car (same shape, empty). */
+function canLoad(cargoItem, car) {
+  if (!cargoItem || !car) return false;
+  if (cargoItem.placed || car.filled) return false;
+  return cargoItem.shape && car.shape && cargoItem.shape.id === car.shape.id;
+}
+
+/** Engine must sit left of every car and be tightly coupled to the first car. */
+function assertTrainOrder(engine, carList) {
+  if (!engine || !carList || !carList.length) return false;
+  const first = carList[0];
+  const last = carList[carList.length - 1];
+  // Engine rear is left edge; front is right edge — must be left of first car
+  if (engine.frontX > first.x - first.w / 2 + 0.5) return false;
+  // Gap between engine rear-of-front and first car left should be ~ENGINE_GAP
+  const gap = (first.x - first.w / 2) - engine.frontX;
+  if (gap < 0 || gap > ENGINE_GAP + 4) return false;
+  // Cars left-to-right order
+  for (let i = 1; i < carList.length; i++) {
+    if (carList[i].x <= carList[i - 1].x) return false;
+  }
+  // Last car is rightmost piece of the consist
+  if (last.x + last.w / 2 < engine.frontX) return false;
+  // Vertical alignment with track
+  if (Math.abs(engine.y - TRACK_Y) > 0.5) return false;
+  if (carList.some(c => Math.abs(c.y - TRACK_Y) > 0.5)) return false;
+  return true;
+}
+
+/** @type {{ x: number, y: number, w: number, h: number, frontX: number, rearX: number } | null} */
+let engine = null;
+
+function layoutStation() {
+  const m = currentMode();
+  const n = Math.min(SHAPES.length, m.shapes | 0);
+  const palette = shuffle(SHAPES).slice(0, n);
+
+  const laid = layoutTrain(palette);
+  engine = laid.engine;
+  cars = laid.cars;
+  cargo = layoutCargo(palette);
 
   hintTimer = 0;
   wrongGlow = null;
@@ -207,7 +278,7 @@ function endDrag(x, y) {
   const car = hitCar(c.x, c.y);
   drag = null;
 
-  if (car && car.shape.id === c.shape.id) {
+  if (canLoad(c, car)) {
     c.placed = true;
     c.x = car.x;
     c.y = car.y - 4;
@@ -452,52 +523,69 @@ function drawStationBg(ctx) {
   ctx.fillText('Shape Station', W / 2, 108);
 }
 
-function drawEngine(ctx, ox) {
-  const x = 28 + ox;
-  const y = 250 + Math.sin(engineBob) * (chugging ? 3 : 1.5);
+/**
+ * Draw locomotive. Nose faces RIGHT; body left edge is eng.x.
+ * Vertical center of body matches car centers (TRACK_Y).
+ */
+function drawEngine(ctx, ox, eng) {
+  const e = eng || engine;
+  if (!e) return;
+  const bob = Math.sin(engineBob) * (chugging ? 2.5 : 1.2);
+  // Body: centered vertically on TRACK_Y like cars
+  const x = e.x + ox;
+  const y = e.y - e.h / 2 + bob;
+  const w = e.w;
+  const h = e.h;
+
   // Body
   ctx.fillStyle = '#EF5350';
-  roundRect(ctx, x, y, 70, 48, 8);
+  roundRect(ctx, x, y, w, h, 8);
   ctx.fill();
+  // Cab at REAR (left) — standard steam layout when nose faces right
   ctx.fillStyle = '#C62828';
-  roundRect(ctx, x + 8, y - 28, 36, 32, 6);
+  roundRect(ctx, x + 6, y - 26, 34, 30, 6);
   ctx.fill();
   // Cab window
   ctx.fillStyle = '#81D4FA';
-  roundRect(ctx, x + 14, y - 22, 24, 18, 3);
+  roundRect(ctx, x + 12, y - 20, 22, 16, 3);
   ctx.fill();
-  // Boiler front
+  // Boiler / nose at FRONT (right)
   ctx.fillStyle = '#B71C1C';
   ctx.beginPath();
-  ctx.arc(x + 70, y + 24, 22, -Math.PI / 2, Math.PI / 2);
+  ctx.arc(x + w, y + h / 2, 20, -Math.PI / 2, Math.PI / 2);
   ctx.fill();
-  // Chimney smoke point
+  // Chimney toward front
   ctx.fillStyle = '#455A64';
-  ctx.fillRect(x + 48, y - 40, 14, 16);
-  // Wheels
+  ctx.fillRect(x + w - 28, y - 38, 14, 16);
+  // Wheels — sit near car wheel line (car: y + h/2 + 4)
+  const wheelY = e.y + 35 + bob;
   ctx.fillStyle = '#37474F';
   ctx.beginPath();
-  ctx.arc(x + 18, y + 50, 12, 0, Math.PI * 2);
-  ctx.arc(x + 52, y + 50, 12, 0, Math.PI * 2);
+  ctx.arc(x + 18, wheelY, 11, 0, Math.PI * 2);
+  ctx.arc(x + w - 22, wheelY, 11, 0, Math.PI * 2);
   ctx.fill();
   ctx.strokeStyle = '#90A4AE';
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.arc(x + 18, y + 50, 6, 0, Math.PI * 2);
-  ctx.arc(x + 52, y + 50, 6, 0, Math.PI * 2);
+  ctx.arc(x + 18, wheelY, 5, 0, Math.PI * 2);
+  ctx.arc(x + w - 22, wheelY, 5, 0, Math.PI * 2);
   ctx.stroke();
-  // Face
+  // Face on the nose (front / right)
   ctx.fillStyle = '#fff';
   ctx.beginPath();
-  ctx.arc(x + 78, y + 16, 4, 0, Math.PI * 2);
+  ctx.arc(x + w + 6, y + h * 0.32, 4, 0, Math.PI * 2);
   ctx.fill();
   ctx.strokeStyle = '#fff';
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.arc(x + 78, y + 28, 6, 0.1 * Math.PI, 0.9 * Math.PI);
+  ctx.arc(x + w + 6, y + h * 0.55, 6, 0.1 * Math.PI, 0.9 * Math.PI);
   ctx.stroke();
+  // Coupler toward cars (right / rear-of-nose side? cars are to the RIGHT of engine
+  // Wait: engine is LEFT of cars, so coupler is on the RIGHT of the engine body
+  ctx.fillStyle = '#607D8B';
+  ctx.fillRect(x + w - 2, e.y - 4 + bob, 10, 8);
 
-  if (chugging && Math.random() > 0.7) spawnSmoke(x + 55, y - 42);
+  if (chugging && Math.random() > 0.7) spawnSmoke(x + w - 22, y - 40);
 }
 
 function drawCar(ctx, car, ox) {
@@ -515,9 +603,10 @@ function drawCar(ctx, car, ox) {
   roundRect(ctx, x - w / 2, y - h / 2, w, h, 10);
   ctx.stroke();
 
-  // Coupler
+  // Couplers (left toward engine / previous car, right toward next)
   ctx.fillStyle = '#607D8B';
   ctx.fillRect(x - w / 2 - 6, y - 4, 8, 8);
+  ctx.fillRect(x + w / 2 - 2, y - 4, 8, 8);
 
   // Wheels
   ctx.fillStyle = '#37474F';
@@ -569,8 +658,8 @@ function drawPlay(ctx) {
 
   const ox = trainOffset;
 
-  // Engine + cars
-  drawEngine(ctx, ox);
+  // Engine leads on the left; cars trail to the right
+  drawEngine(ctx, ox, engine);
   for (const car of cars) drawCar(ctx, car, ox);
 
   // Idle hint on correct car for first free cargo
@@ -620,7 +709,12 @@ function drawPlay(ctx) {
 
 function drawWinScene(ctx) {
   drawStationBg(ctx);
-  drawEngine(ctx, 0);
+  if (!engine || !cars.length) {
+    const demo = layoutTrain(SHAPES.slice(0, 3));
+    engine = demo.engine;
+    cars = demo.cars;
+  }
+  drawEngine(ctx, 0, engine);
   for (const car of cars) {
     car.filled = true;
     drawCar(ctx, car, 0);
@@ -634,12 +728,12 @@ function drawWinScene(ctx) {
 
 function drawMenuBackdrop(ctx) {
   drawStationBg(ctx);
-  drawEngine(ctx, 0);
-  const demo = SHAPES.slice(0, 3);
-  demo.forEach((s, i) => {
-    const car = { shape: s, x: 120 + i * 80, y: 280, w: 68, h: 70, filled: false, pulse: i };
+  const demo = layoutTrain(SHAPES.slice(0, 3));
+  drawEngine(ctx, 0, demo.engine);
+  demo.cars.forEach((car) => {
+    car.filled = true;
     drawCar(ctx, car, 0);
-    drawShape(ctx, s, car.x, car.y - 2, 18, {});
+    drawShape(ctx, car.shape, car.x, car.y - 2, 16, {});
   });
   ctx.fillStyle = 'rgba(20, 40, 60, 0.4)';
   ctx.fillRect(0, 0, W, H);
