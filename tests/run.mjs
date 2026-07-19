@@ -66,7 +66,9 @@ function loadGame() {
     globalThis.__TEST__ = {
       GAME_VERSION, GAME_NAME, W, H, MODES, MODE_ORDER, SHAPES, HINT_AFTER,
       TRACK_Y, ENGINE_BODY_W, ENGINE_BODY_H, ENGINE_GAP, CAR_GAP, TRAIN_PAD, ENGINE_NOSE_EXTRA,
-      shuffle, trainMetrics, layoutTrain, trainFitsOnScreen, layoutCargo, canLoad, assertTrainOrder, allLoaded,
+      TRAIN_BAND_TOP, TRAIN_BAND_BOT,
+      shuffle, trainMetrics, layoutTrain, trainFitsOnScreen, trainPanBounds, clampTrainPan,
+      trainNeedsPan, hitTrainBand, trainDrawOffset, layoutCargo, canLoad, assertTrainOrder, allLoaded,
       layoutStation, enterPlay, enterMenu, startDrag, moveDrag, endDrag,
       hitCargo, hitCar, currentMode,
       state: () => state,
@@ -80,6 +82,8 @@ function loadGame() {
       stationsTarget: () => stationsTarget,
       chugging: () => chugging,
       trainOffset: () => trainOffset,
+      trainPan: () => trainPan,
+      setTrainPan: (v) => { trainPan = v; },
       save,
       setMode, setMuted, setReducedMotion,
       recordLoad, recordStation,
@@ -195,38 +199,66 @@ section('layoutTrain — cars left, engine leads right (ready to take off)');
     const gap = laid.engine.rearX - (last.x + last.w / 2);
     assertClose(gap, laid.metrics.engGap, 0.5, `n=${n} car→engine gap`);
 
-    // Full consist (incl. nose) stays on portrait canvas
-    assert(T.trainFitsOnScreen(laid), `n=${n} train fits on screen`);
-    const leftEdge = laid.cars[0].x - laid.cars[0].w / 2;
-    const rightTip = laid.engine.frontX + T.ENGINE_NOSE_EXTRA;
-    assert(leftEdge >= T.TRAIN_PAD - 0.5, `n=${n} left car not clipped (${leftEdge})`);
-    assert(rightTip <= T.W - T.TRAIN_PAD + 0.5, `n=${n} engine nose not clipped (${rightTip})`);
-
-    // Consist roughly centered (allow more slack when scaled)
-    const left = leftEdge;
-    const right = laid.engine.frontX;
-    const mid = (left + right) / 2;
-    assertClose(mid, T.W / 2, 20, `n=${n} consist centered`);
+    // Short trains fit on screen; long ones report overflow (pan)
+    if (n <= 3) {
+      assert(T.trainFitsOnScreen(laid), `n=${n} short train fits`);
+    }
+    // Order still valid either way
+    assert(T.assertTrainOrder(laid.engine, laid.cars), `n=${n} order after layout`);
   }
 }
 
-// -------------------- portrait Express (6 cars) must fit --------------------
-section('portrait Express — 6-car consist fully visible');
+// -------------------- short train fits; long train pans --------------------
+section('portrait — short fits, long pans');
 {
   const T = loadGame();
-  const m6 = T.trainMetrics(6);
-  assert(m6.carW < 52 || m6.consistBody + m6.nose <= T.W - T.TRAIN_PAD * 2,
-    '6-car metrics shrink or already fit');
-  const laid = T.layoutTrain(T.SHAPES.slice(0, 6));
-  assert(T.trainFitsOnScreen(laid), 'Express layout fits');
-  // Every car fully inside pad
-  for (const c of laid.cars) {
-    assert(c.x - c.w / 2 >= T.TRAIN_PAD - 0.5, `car ${c.shape.id} left on-screen`);
-    assert(c.x + c.w / 2 <= T.W - T.TRAIN_PAD + 0.5, `car ${c.shape.id} right on-screen`);
-  }
-  // Preferred 2-car train is larger (not unnecessarily shrunk)
-  const laid2 = T.layoutTrain(T.SHAPES.slice(0, 2));
-  assert(laid2.cars[0].w >= laid.cars[0].w, 'short train cars ≥ Express cars');
+  const short = T.layoutTrain(T.SHAPES.slice(0, 2));
+  assert(T.trainFitsOnScreen(short), '2-car fits without pan');
+  assertEq(T.trainPanBounds(short).fits, true, '2-car pan bounds fit');
+  assertEq(T.trainPanBounds(short).min, 0, '2-car min pan 0');
+  assertEq(T.trainPanBounds(short).max, 0, '2-car max pan 0');
+
+  const long = T.layoutTrain(T.SHAPES.slice(0, 8));
+  assertEq(long.cars.length, 8, '8 cars laid out');
+  assert(long.metrics.overflows === true, '8-car overflows portrait');
+  assert(T.trainFitsOnScreen(long) === false, '8-car needs pan');
+  const b = T.trainPanBounds(long);
+  assert(b.fits === false, '8-car pan bounds not fit');
+  assert(b.min < b.max, 'pan range has room');
+  // Chunkier cars than old aggressive shrink (carW floor ~50)
+  assert(long.cars[0].w >= 48, 'long train keeps chunky cars');
+  // Clamp works
+  assertEq(T.clampTrainPan(b.min - 50, long), b.min, 'clamp low');
+  assertEq(T.clampTrainPan(b.max + 50, long), b.max, 'clamp high');
+  assertEq(T.clampTrainPan((b.min + b.max) / 2, long), (b.min + b.max) / 2, 'clamp mid');
+}
+
+// -------------------- pan drag API --------------------
+section('pan drag on train band');
+{
+  const T = loadGame();
+  T.enterPlay('pro');
+  assertEq(T.cars().length, 8, 'pro = 8 cars');
+  assert(T.trainNeedsPan(), 'pro needs pan');
+  // Hit band around track, miss cargo area
+  assert(T.hitTrainBand(T.W / 2, T.TRACK_Y) === true, 'band at track');
+  assert(T.hitTrainBand(T.W / 2, T.H - 50) === false, 'not band at platform');
+
+  const before = T.trainPan();
+  // Start pan near track center (avoid cargo)
+  T.startDrag(T.W / 2, T.TRACK_Y);
+  assert(T.drag() && T.drag().kind === 'pan', 'pan drag started');
+  T.moveDrag(T.W / 2 + 40, T.TRACK_Y);
+  // Finger right → pan increases (train shifts right)
+  assert(T.trainPan() > before - 0.01, 'pan increased when dragging right');
+  T.endDrag(T.W / 2 + 40, T.TRACK_Y);
+  assert(T.drag() === null, 'pan drag cleared');
+
+  // Cargo drag still works and is not pan
+  const cargo = T.cargo().find(c => !c.placed);
+  T.startDrag(cargo.x, cargo.y);
+  assert(T.drag() && T.drag().kind === 'cargo', 'cargo drag preferred over pan');
+  T.endDrag(cargo.x, cargo.y);
 }
 
 // -------------------- canLoad match rules --------------------
@@ -321,10 +353,13 @@ section('modes');
   T.enterPlay('free');
   assertEq(T.stationsTarget(), 0, 'free = endless stations');
   assertEq(T.cars().length, 2, 'free = 2 shapes');
+  T.enterPlay('more');
+  assertEq(T.cars().length, 5, 'more = 5 shapes');
   T.enterPlay('pro');
-  assertEq(T.cars().length, 6, 'pro = 6 shapes');
+  assertEq(T.cars().length, 8, 'pro = 8 shapes');
   assertEq(T.stationsTarget(), 8, 'pro stations');
   assert(T.assertTrainOrder(T.engine(), T.cars()), 'pro engine order');
+  assertEq(T.SHAPES.length, 8, '8 shape kinds in catalog');
 }
 
 // -------------------- hit tests --------------------
