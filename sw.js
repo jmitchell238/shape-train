@@ -1,5 +1,5 @@
 // Shape Train — bump with GAME_VERSION in js/config.js
-const CACHE = 'shape-train-1.0.003';
+const CACHE = 'shape-train-1.0.004';
 
 const ASSETS = [
   './',

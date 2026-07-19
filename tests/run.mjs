@@ -65,8 +65,8 @@ function loadGame() {
   const exportFooter = `
     globalThis.__TEST__ = {
       GAME_VERSION, GAME_NAME, W, H, MODES, MODE_ORDER, SHAPES, HINT_AFTER,
-      TRACK_Y, ENGINE_BODY_W, ENGINE_BODY_H, ENGINE_GAP, CAR_GAP,
-      shuffle, layoutTrain, layoutCargo, canLoad, assertTrainOrder, allLoaded,
+      TRACK_Y, ENGINE_BODY_W, ENGINE_BODY_H, ENGINE_GAP, CAR_GAP, TRAIN_PAD, ENGINE_NOSE_EXTRA,
+      shuffle, trainMetrics, layoutTrain, trainFitsOnScreen, layoutCargo, canLoad, assertTrainOrder, allLoaded,
       layoutStation, enterPlay, enterMenu, startDrag, moveDrag, endDrag,
       hitCargo, hitCar, currentMode,
       state: () => state,
@@ -180,7 +180,7 @@ section('layoutTrain — cars left, engine leads right (ready to take off)');
       );
     }
 
-    // Nose is rightmost tip
+    // Nose is rightmost tip of body
     assert(
       laid.engine.frontX > laid.cars[n - 1].x,
       `n=${n} nose beyond rightmost car`
@@ -190,17 +190,43 @@ section('layoutTrain — cars left, engine leads right (ready to take off)');
     assertEq(laid.engine.y, T.TRACK_Y, `n=${n} engine on TRACK_Y`);
     assert(laid.cars.every(c => c.y === T.TRACK_Y), `n=${n} cars on TRACK_Y`);
 
-    // Tight coupler gap: last car right → engine rear
+    // Coupler gap matches metrics (may shrink on long consists)
     const last = laid.cars[n - 1];
     const gap = laid.engine.rearX - (last.x + last.w / 2);
-    assertClose(gap, T.ENGINE_GAP, 0.5, `n=${n} car→engine gap`);
+    assertClose(gap, laid.metrics.engGap, 0.5, `n=${n} car→engine gap`);
 
-    // Consist roughly centered
-    const left = laid.cars[0].x - laid.cars[0].w / 2;
+    // Full consist (incl. nose) stays on portrait canvas
+    assert(T.trainFitsOnScreen(laid), `n=${n} train fits on screen`);
+    const leftEdge = laid.cars[0].x - laid.cars[0].w / 2;
+    const rightTip = laid.engine.frontX + T.ENGINE_NOSE_EXTRA;
+    assert(leftEdge >= T.TRAIN_PAD - 0.5, `n=${n} left car not clipped (${leftEdge})`);
+    assert(rightTip <= T.W - T.TRAIN_PAD + 0.5, `n=${n} engine nose not clipped (${rightTip})`);
+
+    // Consist roughly centered (allow more slack when scaled)
+    const left = leftEdge;
     const right = laid.engine.frontX;
     const mid = (left + right) / 2;
-    assertClose(mid, T.W / 2, 8, `n=${n} consist centered`);
+    assertClose(mid, T.W / 2, 20, `n=${n} consist centered`);
   }
+}
+
+// -------------------- portrait Express (6 cars) must fit --------------------
+section('portrait Express — 6-car consist fully visible');
+{
+  const T = loadGame();
+  const m6 = T.trainMetrics(6);
+  assert(m6.carW < 52 || m6.consistBody + m6.nose <= T.W - T.TRAIN_PAD * 2,
+    '6-car metrics shrink or already fit');
+  const laid = T.layoutTrain(T.SHAPES.slice(0, 6));
+  assert(T.trainFitsOnScreen(laid), 'Express layout fits');
+  // Every car fully inside pad
+  for (const c of laid.cars) {
+    assert(c.x - c.w / 2 >= T.TRAIN_PAD - 0.5, `car ${c.shape.id} left on-screen`);
+    assert(c.x + c.w / 2 <= T.W - T.TRAIN_PAD + 0.5, `car ${c.shape.id} right on-screen`);
+  }
+  // Preferred 2-car train is larger (not unnecessarily shrunk)
+  const laid2 = T.layoutTrain(T.SHAPES.slice(0, 2));
+  assert(laid2.cars[0].w >= laid.cars[0].w, 'short train cars ≥ Express cars');
 }
 
 // -------------------- canLoad match rules --------------------

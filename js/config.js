@@ -1,7 +1,7 @@
 'use strict';
 
 // Shape Train — Keep CACHE in sw.js in sync: 'shape-train-' + GAME_VERSION
-const GAME_VERSION = '1.0.003';
+const GAME_VERSION = '1.0.004';
 const GAME_VERSION_LABEL = 'v' + GAME_VERSION;
 const GAME_NAME = 'Shape Train';
 
@@ -17,12 +17,14 @@ const MODES = {
 };
 const MODE_ORDER = ['free', 'easy', 'more', 'pro'];
 
-/** Track + locomotive geometry (shared by layout + draw) */
+/** Track + locomotive geometry (shared by layout + draw). Portrait-first: layoutTrain scales these down so long consists fit. */
 const TRACK_Y = 280;       // vertical center of car bodies
-const ENGINE_BODY_W = 78;
+const ENGINE_BODY_W = 78;  // preferred engine body width (may shrink)
 const ENGINE_BODY_H = 48;
-const ENGINE_GAP = 10;     // gap between rightmost car and engine rear (engine leads on the right)
+const ENGINE_GAP = 10;     // preferred gap car↔engine rear
 const CAR_GAP = 8;
+const TRAIN_PAD = 14;      // keep consist clear of canvas left/right edges
+const ENGINE_NOSE_EXTRA = 20; // boiler + face past body right edge
 const PLATFORM_Y = H - 110;
 
 const HINT_AFTER = 6;
