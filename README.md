@@ -1,10 +1,8 @@
 # Shape Train
 
-Drag shapes into matching train cars — whistle, chug, confetti. Soft shape matching for ages **4–6**.
+Drag shapes into the train car with the matching shape. When the train is full it whistles and chugs away. A gentle shape-matching game for ages 4–6.
 
-**Play:** https://jmitchell238.github.io/shape-train/
-
-Part of [Arcade Hub](https://jmitchell238.github.io/arcade-hub/).
+Play at https://jmitchell238.github.io/shape-train/. It's one of the games in [Arcade Hub](https://jmitchell238.github.io/arcade-hub/).
 
 ## Modes
 
@@ -17,16 +15,23 @@ Part of [Arcade Hub](https://jmitchell238.github.io/arcade-hub/).
 
 ## Features
 
-- Circle, square, star, triangle, heart, diamond, moon, hex
-- Drag the train left/right to scroll long consists (portrait-first)
-- Soft wrong-drop bounce + correct-car hint
-- Full train chugs away with whistle + smoke
-- Sound mute + reduced motion
-- Offline PWA
+- Shapes: circle, square, star, triangle, heart, diamond, moon and hexagon
+- Drag the train sideways to see the rest of a long train (designed for portrait)
+- A wrong drop bounces back and the right car is highlighted
+- Mute and Calm motion settings
+- Installable PWA that works offline
 
-## Stack
+There are no lives, ads, accounts or fail screens.
 
-Static HTML / CSS / Canvas. No build step.
+## Running locally
+
+```bash
+python3 -m http.server 8080
+```
+
+Then open http://localhost:8080. The service worker needs `localhost` or HTTPS.
+
+Plain HTML, CSS and canvas with no build step.
 
 ## Tests
 
@@ -34,22 +39,10 @@ Static HTML / CSS / Canvas. No build step.
 node tests/run.mjs
 ```
 
-VM-loaded unit tests (layout, match rules, drag flow, save) plus PWA shell checks — same style as bottle-sort / maze-adventure.
-
 ## Versioning
 
-`GAME_VERSION` in `js/config.js` ↔ `CACHE` in `sw.js`.
-
-## Local preview
-
-```bash
-python3 -m http.server 8080
-```
-
-## Parents
-
-No lives, ads, accounts, or fail screens.
+When you bump `GAME_VERSION` in `js/config.js`, set `CACHE` in `sw.js` to `'shape-train-' + GAME_VERSION`.
 
 ## License
 
-Personal project for family Arcade Hub.
+Personal project for the family.
